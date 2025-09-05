@@ -49,7 +49,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 import gi
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, GObject, GLib
+from gi.repository import Gtk, GObject, GLib, Gdk
 
 # Make sure GLib is threads-aware
 GObject.threads_init()
@@ -394,14 +394,17 @@ class DownloadManagerApp(Gtk.ApplicationWindow):
 
     def __init__(self, app):
         super().__init__(application=app)
-        self.set_default_size(900, 420)
-        self.set_title("Linux Download Manager")
+        self.set_default_size(1000, 600)
+        self.set_title("Download Manager")
         
         # Initialize config manager
         self.config_manager = ConfigManager()
         
         # Start HTTP server for Chrome extension
         self.start_http_server()
+        
+        # Apply modern styling
+        self.setup_modern_styling()
         
         # Create header bar
         self.setup_headerbar()
@@ -413,91 +416,414 @@ class DownloadManagerApp(Gtk.ApplicationWindow):
         # Headerbar
         hb = Gtk.HeaderBar()
         hb.set_show_title_buttons(True)
-        hb.set_title_widget(Gtk.Label(label="Download Manager"))
+        
+        # Title with clean styling
+        title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        title_box.set_margin_start(16)
+        
+        # Icon
+        title_icon = Gtk.Image()
+        title_icon.set_from_icon_name("folder-download-symbolic")
+        title_icon.set_pixel_size(24)
+        title_box.append(title_icon)
+        
+        # Title text
+        title_label = Gtk.Label()
+        title_label.set_markup("<span size='large' weight='bold' color='#1f2937'>Download Manager</span>")
+        title_label.set_halign(Gtk.Align.START)
+        title_box.append(title_label)
+        
+        hb.set_title_widget(title_box)
         self.set_titlebar(hb)
+
+        # Left side buttons with modern styling
+        left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        left_box.set_margin_start(16)
+        left_box.set_margin_end(16)
+        left_box.set_margin_top(8)
+        left_box.set_margin_bottom(8)
 
         self.add_button = Gtk.Button()
         self.add_button.set_icon_name("list-add-symbolic")
-        self.add_button.set_tooltip_text("Add download")
+        self.add_button.set_tooltip_text("Add Download")
+        self.add_button.set_css_classes(["suggested-action"])
         self.add_button.connect("clicked", self.on_add_clicked)
-        hb.pack_start(self.add_button)
+        left_box.append(self.add_button)
 
         self.start_all_btn = Gtk.Button()
         self.start_all_btn.set_icon_name("media-playback-start-symbolic")
-        self.start_all_btn.set_tooltip_text("Start all")
+        self.start_all_btn.set_tooltip_text("Start All Downloads")
         self.start_all_btn.connect("clicked", self.on_start_all)
-        hb.pack_start(self.start_all_btn)
+        left_box.append(self.start_all_btn)
 
         self.pause_all_btn = Gtk.Button()
         self.pause_all_btn.set_icon_name("media-playback-pause-symbolic")
-        self.pause_all_btn.set_tooltip_text("Pause all")
+        self.pause_all_btn.set_tooltip_text("Pause All Downloads")
         self.pause_all_btn.connect("clicked", self.on_pause_all)
-        hb.pack_start(self.pause_all_btn)
+        left_box.append(self.pause_all_btn)
+
+        hb.pack_start(left_box)
+
+        # Right side buttons
+        right_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        right_box.set_margin_start(16)
+        right_box.set_margin_end(16)
+        right_box.set_margin_top(8)
+        right_box.set_margin_bottom(8)
 
         self.settings_btn = Gtk.Button()
         self.settings_btn.set_icon_name("preferences-system-symbolic")
         self.settings_btn.set_tooltip_text("Settings")
         self.settings_btn.connect("clicked", self.on_settings_clicked)
-        hb.pack_end(self.settings_btn)
+        right_box.append(self.settings_btn)
 
         self.remove_btn = Gtk.Button()
         self.remove_btn.set_icon_name("edit-delete-symbolic")
-        self.remove_btn.set_tooltip_text("Remove selected")
+        self.remove_btn.set_tooltip_text("Remove Selected")
+        self.remove_btn.set_css_classes(["destructive-action"])
         self.remove_btn.connect("clicked", self.on_remove_selected)
-        hb.pack_end(self.remove_btn)
+        right_box.append(self.remove_btn)
+
+        hb.pack_end(right_box)
 
     def setup_main_content(self):
+        # Main container with modern styling
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        main_box.set_margin_start(20)
+        main_box.set_margin_end(20)
+        main_box.set_margin_top(20)
+        main_box.set_margin_bottom(20)
+
+        # Stats header
+        stats_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        stats_box.set_margin_bottom(16)
+        
+        # Download stats with icon
+        stats_icon = Gtk.Image()
+        stats_icon.set_from_icon_name("document-save-symbolic")
+        stats_icon.set_pixel_size(20)
+        stats_box.append(stats_icon)
+        
+        self.stats_label = Gtk.Label()
+        self.stats_label.set_markup("<span size='large' weight='bold' color='#1f2937'>Downloads</span>")
+        self.stats_label.set_halign(Gtk.Align.START)
+        stats_box.append(self.stats_label)
+        
+        # Empty space
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        stats_box.append(spacer)
+        
+        # Connection status with icon
+        connection_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        
+        connection_icon = Gtk.Image()
+        connection_icon.set_from_icon_name("network-workgroup-symbolic")
+        connection_icon.set_pixel_size(16)
+        connection_box.append(connection_icon)
+        
+        self.connection_label = Gtk.Label()
+        self.connection_label.set_markup("<span color='#059669' weight='bold'>Connected</span>")
+        self.connection_label.set_halign(Gtk.Align.END)
+        connection_box.append(self.connection_label)
+        
+        stats_box.append(connection_box)
+        
+        main_box.append(stats_box)
+
         # ListStore model
         self.store = Gtk.ListStore(str, int, str, str, str, str, object)
 
-        # TreeView
+        # TreeView with modern styling
         self.view = Gtk.TreeView(model=self.store)
         self.view.set_headers_clickable(True)
         self.view.connect("row-activated", self.on_row_activated)
+        self.view.set_css_classes(["download-list"])
 
-        # Columns
+        # Columns with modern styling
         # Filename
         renderer_text = Gtk.CellRendererText()
+        renderer_text.set_padding(12, 8)
         col = Gtk.TreeViewColumn("File", renderer_text, text=self.COL_FILENAME)
         col.set_sort_column_id(self.COL_FILENAME)
         col.set_resizable(True)
+        col.set_min_width(200)
         self.view.append_column(col)
 
         # Progress
         renderer_prog = Gtk.CellRendererProgress()
+        renderer_prog.set_padding(12, 8)
         col = Gtk.TreeViewColumn("Progress", renderer_prog, value=self.COL_PROGRESS, text=self.COL_STATUS)
         col.set_resizable(True)
+        col.set_min_width(150)
         self.view.append_column(col)
 
         # Status
         renderer_text = Gtk.CellRendererText()
+        renderer_text.set_padding(12, 8)
         col = Gtk.TreeViewColumn("Status", renderer_text, text=self.COL_STATUS)
         col.set_resizable(True)
+        col.set_min_width(120)
         self.view.append_column(col)
 
         # Speed
         renderer_text = Gtk.CellRendererText()
+        renderer_text.set_padding(12, 8)
         col = Gtk.TreeViewColumn("Speed", renderer_text, text=self.COL_SPEED)
         col.set_resizable(True)
+        col.set_min_width(100)
         self.view.append_column(col)
 
         # ETA
         renderer_text = Gtk.CellRendererText()
+        renderer_text.set_padding(12, 8)
         col = Gtk.TreeViewColumn("ETA", renderer_text, text=self.COL_ETA)
         col.set_resizable(True)
+        col.set_min_width(80)
         self.view.append_column(col)
 
         # URL
         renderer_text = Gtk.CellRendererText()
+        renderer_text.set_padding(12, 8)
+        renderer_text.set_property("ellipsize", 3)  # PANGO_ELLIPSIZE_END
         col = Gtk.TreeViewColumn("URL", renderer_text, text=self.COL_URL)
         col.set_resizable(True)
+        col.set_min_width(200)
         self.view.append_column(col)
 
+        # Scrollable container
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scroll.set_child(self.view)
+        scroll.set_css_classes(["download-scroll"])
 
-        self.set_child(scroll)
+        main_box.append(scroll)
+        self.set_child(main_box)
+
+    def update_stats_display(self):
+        """Update the stats display with current download information"""
+        total_downloads = len(self.store)
+        active_downloads = 0
+        completed_downloads = 0
+        
+        for row in self.store:
+            item: DownloadItem = row[self.COL_OBJ]
+            if item:
+                if item.is_active():
+                    active_downloads += 1
+                elif item.status == "Done":
+                    completed_downloads += 1
+        
+        stats_text = f"<span size='large' weight='bold' color='#1f2937'>Downloads</span>\n"
+        stats_text += f"<span size='small' color='#6b7280'>{total_downloads} total • {active_downloads} active • {completed_downloads} completed</span>"
+        
+        self.stats_label.set_markup(stats_text)
+
+    def setup_modern_styling(self):
+        """Apply modern CSS styling to the application"""
+        css_provider = Gtk.CssProvider()
+        css = """
+        /* Modern color palette */
+        * {
+            font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        /* Header bar styling */
+        headerbar {
+            background: #ffffff;
+            color: #1f2937;
+            border: none;
+            border-bottom: 1px solid #e5e7eb;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        headerbar button {
+            background: #f9fafb;
+            color: #374151;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin: 0 4px;
+            transition: all 0.2s ease;
+        }
+        
+        headerbar button:hover {
+            background: #f3f4f6;
+            border-color: #9ca3af;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        headerbar button:active {
+            transform: translateY(0);
+            background: #e5e7eb;
+        }
+        
+        headerbar button.suggested-action {
+            background: #3b82f6;
+            color: white;
+            border-color: #2563eb;
+        }
+        
+        headerbar button.suggested-action:hover {
+            background: #2563eb;
+            border-color: #1d4ed8;
+        }
+        
+        headerbar button.destructive-action {
+            background: #ef4444;
+            color: white;
+            border-color: #dc2626;
+        }
+        
+        headerbar button.destructive-action:hover {
+            background: #dc2626;
+            border-color: #b91c1c;
+        }
+        
+        /* Main window styling */
+        window {
+            background-color: #f8fafc;
+        }
+        
+        /* TreeView styling */
+        treeview {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid #e5e7eb;
+        }
+        
+        treeview:selected {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        treeview header {
+            background: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+            font-weight: 600;
+            color: #374151;
+            padding: 12px 16px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        /* Download list specific styling */
+        .download-list {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid #e5e7eb;
+        }
+        
+        .download-scroll {
+            background: transparent;
+            border: none;
+        }
+        
+        /* Progress bar styling */
+        progressbar {
+            background: #e5e7eb;
+            border-radius: 4px;
+            min-height: 6px;
+        }
+        
+        progressbar progress {
+            background: #3b82f6;
+            border-radius: 4px;
+        }
+        
+        /* Button styling */
+        button {
+            background: #f9fafb;
+            color: #374151;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 10px 16px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        
+        button:hover {
+            background: #f3f4f6;
+            border-color: #9ca3af;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        button:active {
+            transform: translateY(0);
+            background: #e5e7eb;
+        }
+        
+        button.suggested-action {
+            background: #3b82f6;
+            color: white;
+            border-color: #2563eb;
+        }
+        
+        button.suggested-action:hover {
+            background: #2563eb;
+            border-color: #1d4ed8;
+        }
+        
+        /* Entry styling */
+        entry {
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 12px 16px;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+        
+        entry:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        /* Label styling */
+        label {
+            color: #374151;
+        }
+        
+        /* Dialog styling */
+        dialog {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .modern-dialog {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .modern-dialog headerbar {
+            background: #ffffff;
+            color: #1f2937;
+            border-bottom: 1px solid #e5e7eb;
+            border-radius: 8px 8px 0 0;
+        }
+        
+        /* Status colors */
+        .status-queued { color: #6b7280; }
+        .status-downloading { color: #059669; }
+        .status-paused { color: #d97706; }
+        .status-done { color: #059669; }
+        .status-error { color: #dc2626; }
+        """
+        
+        css_provider.load_from_data(css.encode())
+        # Apply CSS to the application
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(),
+            css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
 
     def start_http_server(self):
         """Start HTTP server for Chrome extension communication"""
@@ -592,6 +918,9 @@ class DownloadManagerApp(Gtk.ApplicationWindow):
         eta = "--"
         self.store.append([item.filename, progress, item.status, speed, eta, url, item])
         
+        # Update stats display
+        self.update_stats_display()
+        
         # Automatically start the download
         item.start()
 
@@ -616,6 +945,9 @@ class DownloadManagerApp(Gtk.ApplicationWindow):
                 row[self.COL_ETA] = eta
                 row[self.COL_URL] = item.url
                 break
+        
+        # Update stats display
+        self.update_stats_display()
         return False
 
 
@@ -625,7 +957,8 @@ class AddDownloadDialog(Gtk.Dialog):
         self.config_manager = config_manager
         self.add_button("_Cancel", Gtk.ResponseType.CANCEL)
         self.add_button("_OK", Gtk.ResponseType.OK)
-        self.set_default_size(640, 100)
+        self.set_default_size(600, 200)
+        self.set_css_classes(["modern-dialog"])
 
         box = self.get_content_area()
 
@@ -727,6 +1060,7 @@ class SettingsDialog(Gtk.Dialog):
         self.add_button("_Cancel", Gtk.ResponseType.CANCEL)
         self.add_button("_OK", Gtk.ResponseType.OK)
         self.set_default_size(500, 200)
+        self.set_css_classes(["modern-dialog"])
 
         box = self.get_content_area()
 
