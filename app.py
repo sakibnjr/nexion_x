@@ -34,6 +34,7 @@ import queue
 import signal
 import shutil
 import threading
+import json
 from dataclasses import dataclass, field
 from typing import Optional, Deque
 from collections import deque
@@ -78,6 +79,48 @@ def human_time(seconds: Optional[float]) -> str:
     if m > 0:
         return f"{m:d}m {s:02d}s"
     return f"{s:d}s"
+
+
+# ------------------------- Configuration -------------------------
+
+class ConfigManager:
+    def __init__(self, config_file="~/.config/download_manager.json"):
+        self.config_file = os.path.expanduser(config_file)
+        self.config = self.load_config()
+    
+    def load_config(self):
+        """Load configuration from file or return defaults"""
+        default_config = {
+            "default_download_path": os.path.expanduser("~/Downloads"),
+            "max_concurrent_downloads": 3
+        }
+        
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    config = json.load(f)
+                    # Merge with defaults to handle new config options
+                    default_config.update(config)
+        except (json.JSONDecodeError, IOError):
+            pass
+        
+        return default_config
+    
+    def save_config(self):
+        """Save configuration to file"""
+        try:
+            os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
+            with open(self.config_file, 'w') as f:
+                json.dump(self.config, f, indent=2)
+        except IOError:
+            pass
+    
+    def get(self, key, default=None):
+        return self.config.get(key, default)
+    
+    def set(self, key, value):
+        self.config[key] = value
+        self.save_config()
 
 
 # ------------------------- Download Worker -------------------------
@@ -288,6 +331,9 @@ class DownloadManagerApp(Gtk.ApplicationWindow):
         self.set_default_size(900, 420)
         self.set_title("Linux Download Manager")
         
+        # Initialize config manager
+        self.config_manager = ConfigManager()
+        
         # Create header bar
         self.setup_headerbar()
         
@@ -318,6 +364,12 @@ class DownloadManagerApp(Gtk.ApplicationWindow):
         self.pause_all_btn.set_tooltip_text("Pause all")
         self.pause_all_btn.connect("clicked", self.on_pause_all)
         hb.pack_start(self.pause_all_btn)
+
+        self.settings_btn = Gtk.Button()
+        self.settings_btn.set_icon_name("preferences-system-symbolic")
+        self.settings_btn.set_tooltip_text("Settings")
+        self.settings_btn.connect("clicked", self.on_settings_clicked)
+        hb.pack_end(self.settings_btn)
 
         self.remove_btn = Gtk.Button()
         self.remove_btn.set_icon_name("edit-delete-symbolic")
@@ -380,8 +432,13 @@ class DownloadManagerApp(Gtk.ApplicationWindow):
 
     # --------- Events ---------
     def on_add_clicked(self, *_):
-        dialog = AddDownloadDialog(self)
+        dialog = AddDownloadDialog(self, self.config_manager)
         dialog.connect("response", self.on_add_dialog_response)
+        dialog.show()
+    
+    def on_settings_clicked(self, *_):
+        dialog = SettingsDialog(self, self.config_manager)
+        dialog.connect("response", self.on_settings_dialog_response)
         dialog.show()
     
     def on_add_dialog_response(self, dialog, response):
@@ -389,6 +446,28 @@ class DownloadManagerApp(Gtk.ApplicationWindow):
             url, dest = dialog.get_values()
             if url and dest:
                 self.add_download(url, dest)
+        dialog.destroy()
+    
+    def on_settings_dialog_response(self, dialog, response):
+        if response == Gtk.ResponseType.OK:
+            new_path = dialog.get_values()
+            if new_path:
+                # Expand user path and validate
+                expanded_path = os.path.expanduser(new_path)
+                if os.path.exists(expanded_path) and os.path.isdir(expanded_path):
+                    self.config_manager.set("default_download_path", expanded_path)
+                else:
+                    # Show error dialog
+                    error_dialog = Gtk.MessageDialog(
+                        transient_for=self,
+                        modal=True,
+                        message_type=Gtk.MessageType.ERROR,
+                        buttons=Gtk.ButtonsType.OK,
+                        text="Invalid Directory",
+                        secondary_text=f"The directory '{expanded_path}' does not exist or is not accessible."
+                    )
+                    error_dialog.run()
+                    error_dialog.destroy()
         dialog.destroy()
 
     def on_start_all(self, *_):
@@ -459,8 +538,9 @@ class DownloadManagerApp(Gtk.ApplicationWindow):
 
 
 class AddDownloadDialog(Gtk.Dialog):
-    def __init__(self, parent: Gtk.Window):
+    def __init__(self, parent: Gtk.Window, config_manager: ConfigManager):
         super().__init__(title="Add Download", transient_for=parent, modal=True)
+        self.config_manager = config_manager
         self.add_button("_Cancel", Gtk.ResponseType.CANCEL)
         self.add_button("_OK", Gtk.ResponseType.OK)
         self.set_default_size(640, 100)
@@ -485,14 +565,28 @@ class AddDownloadDialog(Gtk.Dialog):
         # Save location chooser (native save dialog)
         self.choose_btn = Gtk.Button(label="Choose save location…")
         self.choose_btn.connect("clicked", self.on_choose_dest)
+        self.use_default_btn = Gtk.Button(label="Use Default")
+        self.use_default_btn.connect("clicked", self.on_use_default)
         self.dest_label = Gtk.Label(label="No file chosen")
         self.dest_label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
         self.dest_path: Optional[str] = None
+        
+        # Initialize with default path
+        default_path = self.config_manager.get("default_download_path", "~/Downloads")
+        self.dest_path = os.path.expanduser(default_path)
+        self.dest_label.set_text(self.dest_path)
 
         grid.attach(lbl_url, 0, 0, 1, 1)
         grid.attach(self.entry_url, 1, 0, 2, 1)
         grid.attach(self.choose_btn, 1, 1, 1, 1)
-        grid.attach(self.dest_label, 2, 1, 1, 1)
+        grid.attach(self.use_default_btn, 2, 1, 1, 1)
+        grid.attach(self.dest_label, 1, 2, 2, 1)
+
+    def on_use_default(self, *_):
+        # Reset to default path
+        default_path = self.config_manager.get("default_download_path", "~/Downloads")
+        self.dest_path = os.path.expanduser(default_path)
+        self.dest_label.set_text(self.dest_path)
 
     def on_choose_dest(self, *_):
         # Try to guess filename from URL
@@ -509,6 +603,12 @@ class AddDownloadDialog(Gtk.Dialog):
         dialog.add_button("_Cancel", Gtk.ResponseType.CANCEL)
         dialog.add_button("_Save", Gtk.ResponseType.OK)
         
+        # Start from default directory
+        default_path = self.config_manager.get("default_download_path", "~/Downloads")
+        expanded_default = os.path.expanduser(default_path)
+        if os.path.exists(expanded_default):
+            dialog.set_current_folder(expanded_default)
+        
         if guessed:
             dialog.set_current_name(guessed)
         
@@ -524,7 +624,81 @@ class AddDownloadDialog(Gtk.Dialog):
         dialog.destroy()
 
     def get_values(self):
-        return self.entry_url.get_text().strip(), self.dest_path
+        url = self.entry_url.get_text().strip()
+        if not url:
+            return "", ""
+        
+        # If dest_path is just a directory, append filename from URL
+        if self.dest_path and os.path.isdir(self.dest_path):
+            filename = os.path.basename(url.split("?")[0].split("#")[0]) or "download.bin"
+            full_path = os.path.join(self.dest_path, filename)
+        else:
+            full_path = self.dest_path or ""
+        
+        return url, full_path
+
+
+class SettingsDialog(Gtk.Dialog):
+    def __init__(self, parent: Gtk.Window, config_manager: ConfigManager):
+        super().__init__(title="Settings", transient_for=parent, modal=True)
+        self.config_manager = config_manager
+        self.add_button("_Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("_OK", Gtk.ResponseType.OK)
+        self.set_default_size(500, 200)
+
+        box = self.get_content_area()
+
+        grid = Gtk.Grid()
+        grid.set_column_spacing(8)
+        grid.set_row_spacing(8)
+        grid.set_margin_top(12)
+        grid.set_margin_bottom(12)
+        grid.set_margin_start(12)
+        grid.set_margin_end(12)
+        box.append(grid)
+
+        # Default download path
+        lbl_path = Gtk.Label(label="Default Download Path:")
+        lbl_path.set_halign(Gtk.Align.START)
+        lbl_path.set_valign(Gtk.Align.CENTER)
+        
+        self.entry_path = Gtk.Entry()
+        self.entry_path.set_text(self.config_manager.get("default_download_path", "~/Downloads"))
+        self.entry_path.set_placeholder_text("~/Downloads")
+        
+        self.choose_path_btn = Gtk.Button(label="Browse...")
+        self.choose_path_btn.connect("clicked", self.on_choose_path)
+        
+        grid.attach(lbl_path, 0, 0, 1, 1)
+        grid.attach(self.entry_path, 1, 0, 1, 1)
+        grid.attach(self.choose_path_btn, 2, 0, 1, 1)
+
+    def on_choose_path(self, *_):
+        dialog = Gtk.FileChooserDialog(
+            title="Select Default Download Directory",
+            transient_for=self,
+            action=Gtk.FileChooserAction.SELECT_FOLDER,
+        )
+        dialog.add_button("_Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("_Select", Gtk.ResponseType.OK)
+        
+        # Set current path if it exists
+        current_path = self.entry_path.get_text().strip()
+        if current_path and os.path.exists(os.path.expanduser(current_path)):
+            dialog.set_current_folder(os.path.expanduser(current_path))
+        
+        dialog.connect("response", self.on_folder_chooser_response)
+        dialog.show()
+    
+    def on_folder_chooser_response(self, dialog, response):
+        if response == Gtk.ResponseType.OK:
+            folder = dialog.get_file()
+            if folder:
+                self.entry_path.set_text(folder.get_path())
+        dialog.destroy()
+
+    def get_values(self):
+        return self.entry_path.get_text().strip()
 
 
 # ------------------------- Main -------------------------
