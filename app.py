@@ -11,7 +11,7 @@ Features:
 - Start All / Pause All / Remove selected
 
 Dependencies:
-  sudo apt-get install -y python3-gi gir1.2-gtk-3.0
+  sudo apt-get install -y python3-gi gir1.2-gtk-4.0
   pip install requests
 
 Run:
@@ -45,7 +45,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 import gi
-gi.require_version("Gtk", "3.0")
+gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GObject, GLib
 
 # Make sure GLib is threads-aware
@@ -274,7 +274,7 @@ class DownloadItem:
 
 # ------------------------- GTK App -------------------------
 
-class DownloadManagerApp(Gtk.Window):
+class DownloadManagerApp(Gtk.ApplicationWindow):
     COL_FILENAME = 0
     COL_PROGRESS = 1
     COL_STATUS = 2
@@ -283,44 +283,54 @@ class DownloadManagerApp(Gtk.Window):
     COL_URL = 5
     COL_OBJ = 6
 
-    def __init__(self):
-        super().__init__(title="Linux Download Manager")
+    def __init__(self, app):
+        super().__init__(application=app)
         self.set_default_size(900, 420)
-        self.set_border_width(6)
-        self.connect("destroy", self.on_destroy)
+        self.set_title("Linux Download Manager")
+        
+        # Create header bar
+        self.setup_headerbar()
+        
+        # Create main content
+        self.setup_main_content()
 
+    def setup_headerbar(self):
         # Headerbar
         hb = Gtk.HeaderBar()
-        hb.set_show_close_button(True)
-        hb.props.title = "Download Manager"
+        hb.set_show_title_buttons(True)
+        hb.set_title_widget(Gtk.Label(label="Download Manager"))
         self.set_titlebar(hb)
 
-        self.add_button = Gtk.Button.new_from_icon_name("list-add", Gtk.IconSize.BUTTON)
+        self.add_button = Gtk.Button()
+        self.add_button.set_icon_name("list-add-symbolic")
         self.add_button.set_tooltip_text("Add download")
         self.add_button.connect("clicked", self.on_add_clicked)
         hb.pack_start(self.add_button)
 
-        self.start_all_btn = Gtk.Button.new_from_icon_name("media-playback-start", Gtk.IconSize.BUTTON)
+        self.start_all_btn = Gtk.Button()
+        self.start_all_btn.set_icon_name("media-playback-start-symbolic")
         self.start_all_btn.set_tooltip_text("Start all")
         self.start_all_btn.connect("clicked", self.on_start_all)
         hb.pack_start(self.start_all_btn)
 
-        self.pause_all_btn = Gtk.Button.new_from_icon_name("media-playback-pause", Gtk.IconSize.BUTTON)
+        self.pause_all_btn = Gtk.Button()
+        self.pause_all_btn.set_icon_name("media-playback-pause-symbolic")
         self.pause_all_btn.set_tooltip_text("Pause all")
         self.pause_all_btn.connect("clicked", self.on_pause_all)
         hb.pack_start(self.pause_all_btn)
 
-        self.remove_btn = Gtk.Button.new_from_icon_name("edit-delete", Gtk.IconSize.BUTTON)
+        self.remove_btn = Gtk.Button()
+        self.remove_btn.set_icon_name("edit-delete-symbolic")
         self.remove_btn.set_tooltip_text("Remove selected")
         self.remove_btn.connect("clicked", self.on_remove_selected)
         hb.pack_end(self.remove_btn)
 
+    def setup_main_content(self):
         # ListStore model
         self.store = Gtk.ListStore(str, int, str, str, str, str, object)
 
         # TreeView
         self.view = Gtk.TreeView(model=self.store)
-        self.view.set_rules_hint(True)
         self.view.set_headers_clickable(True)
         self.view.connect("row-activated", self.on_row_activated)
 
@@ -364,23 +374,17 @@ class DownloadManagerApp(Gtk.Window):
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        scroll.add(self.view)
+        scroll.set_child(self.view)
 
-        self.add(scroll)
-        self.show_all()
+        self.set_child(scroll)
 
     # --------- Events ---------
-    def on_destroy(self, *_):
-        # Try to stop active downloads gracefully
-        for row in list(self.store):
-            item: DownloadItem = row[self.COL_OBJ]
-            if item and item.is_active():
-                item.pause()
-        Gtk.main_quit()
-
     def on_add_clicked(self, *_):
         dialog = AddDownloadDialog(self)
-        response = dialog.run()
+        dialog.connect("response", self.on_add_dialog_response)
+        dialog.show()
+    
+    def on_add_dialog_response(self, dialog, response):
         if response == Gtk.ResponseType.OK:
             url, dest = dialog.get_values()
             if url and dest:
@@ -390,7 +394,10 @@ class DownloadManagerApp(Gtk.Window):
     def on_start_all(self, *_):
         for row in self.store:
             item: DownloadItem = row[self.COL_OBJ]
-            if item and not item.is_active() and item.status in ("Queued", "Paused", "Error", "HTTP error: 416"):
+            if item and not item.is_active() and (
+                item.status in ("Queued", "Paused") or 
+                item.status.startswith(("Connection error:", "Timeout error:", "Request error:", "HTTP error:", "Error:"))
+            ):
                 item.start()
 
     def on_pause_all(self, *_):
@@ -453,14 +460,21 @@ class DownloadManagerApp(Gtk.Window):
 
 class AddDownloadDialog(Gtk.Dialog):
     def __init__(self, parent: Gtk.Window):
-        super().__init__(title="Add Download", transient_for=parent, flags=0)
-        self.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        super().__init__(title="Add Download", transient_for=parent, modal=True)
+        self.add_button("_Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("_OK", Gtk.ResponseType.OK)
         self.set_default_size(640, 100)
 
         box = self.get_content_area()
 
-        grid = Gtk.Grid(column_spacing=8, row_spacing=8, margin=12)
-        box.add(grid)
+        grid = Gtk.Grid()
+        grid.set_column_spacing(8)
+        grid.set_row_spacing(8)
+        grid.set_margin_top(12)
+        grid.set_margin_bottom(12)
+        grid.set_margin_start(12)
+        grid.set_margin_end(12)
+        box.append(grid)
 
         # URL entry
         lbl_url = Gtk.Label(label="URL:")
@@ -480,27 +494,33 @@ class AddDownloadDialog(Gtk.Dialog):
         grid.attach(self.choose_btn, 1, 1, 1, 1)
         grid.attach(self.dest_label, 2, 1, 1, 1)
 
-        self.show_all()
-
     def on_choose_dest(self, *_):
         # Try to guess filename from URL
         guessed = None
         url_text = self.entry_url.get_text().strip()
         if url_text:
             guessed = os.path.basename(url_text.split("?")[0].split("#")[0]) or "download.bin"
+        
         dialog = Gtk.FileChooserDialog(
             title="Save As",
-            parent=self,
+            transient_for=self,
             action=Gtk.FileChooserAction.SAVE,
         )
-        dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.OK)
-        dialog.set_do_overwrite_confirmation(True)
+        dialog.add_button("_Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("_Save", Gtk.ResponseType.OK)
+        
         if guessed:
             dialog.set_current_name(guessed)
-        response = dialog.run()
+        
+        dialog.connect("response", self.on_file_chooser_response)
+        dialog.show()
+    
+    def on_file_chooser_response(self, dialog, response):
         if response == Gtk.ResponseType.OK:
-            self.dest_path = dialog.get_filename()
-            self.dest_label.set_text(self.dest_path)
+            file = dialog.get_file()
+            if file:
+                self.dest_path = file.get_path()
+                self.dest_label.set_text(self.dest_path)
         dialog.destroy()
 
     def get_values(self):
@@ -509,12 +529,30 @@ class AddDownloadDialog(Gtk.Dialog):
 
 # ------------------------- Main -------------------------
 
+class DownloadManagerApplication(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="com.example.downloadmanager")
+        self.connect("activate", self.on_activate)
+        self.connect("shutdown", self.on_shutdown)
+
+    def on_activate(self, app):
+        self.win = DownloadManagerApp(self)
+        self.win.present()
+    
+    def on_shutdown(self, app):
+        # Try to stop active downloads gracefully
+        if hasattr(self, 'win') and self.win.store:
+            for row in list(self.win.store):
+                item: DownloadItem = row[self.win.COL_OBJ]
+                if item and item.is_active():
+                    item.pause()
+
 def main():
     # Handle Ctrl+C
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
-    app = DownloadManagerApp()
-    Gtk.main()
+    app = DownloadManagerApplication()
+    return app.run(sys.argv)
 
 
 if __name__ == "__main__":
