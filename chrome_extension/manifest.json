@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Download Manager Integration",
+  "version": "1.0",
+  "description": "Integrates with Linux Download Manager to handle downloads",
+  "permissions": [
+    "downloads",
+    "storage",
+    "activeTab",
+    "contextMenus"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Download Manager"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

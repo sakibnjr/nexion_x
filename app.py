@@ -38,6 +38,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Optional, Deque
 from collections import deque
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import urllib.parse
 
 import requests
 import urllib3
@@ -121,6 +123,70 @@ class ConfigManager:
     def set(self, key, value):
         self.config[key] = value
         self.save_config()
+
+
+# ------------------------- HTTP Server for Chrome Extension -------------------------
+
+class DownloadManagerHTTPHandler(BaseHTTPRequestHandler):
+    def __init__(self, app_instance, *args, **kwargs):
+        self.app = app_instance
+        super().__init__(*args, **kwargs)
+    
+    def do_GET(self):
+        if self.path == '/ping':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{"status": "ok"}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def do_POST(self):
+        if self.path == '/add_download':
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            
+            try:
+                data = json.loads(post_data.decode('utf-8'))
+                url = data.get('url')
+                filename = data.get('filename', 'download')
+                
+                if url:
+                    # Get default download path
+                    default_path = self.app.config_manager.get("default_download_path", "~/Downloads")
+                    dest_path = os.path.join(os.path.expanduser(default_path), filename)
+                    
+                    # Add download to the app
+                    GLib.idle_add(self.app.add_download, url, dest_path)
+                    
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(b'{"status": "success"}')
+                else:
+                    self.send_response(400)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(b'{"error": "URL required"}')
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(f'{{"error": "{str(e)}"}}'.encode('utf-8'))
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        # Suppress HTTP server logs
+        pass
+
+
+def create_http_handler(app_instance):
+    def handler(*args, **kwargs):
+        return DownloadManagerHTTPHandler(app_instance, *args, **kwargs)
+    return handler
 
 
 # ------------------------- Download Worker -------------------------
@@ -334,6 +400,9 @@ class DownloadManagerApp(Gtk.ApplicationWindow):
         # Initialize config manager
         self.config_manager = ConfigManager()
         
+        # Start HTTP server for Chrome extension
+        self.start_http_server()
+        
         # Create header bar
         self.setup_headerbar()
         
@@ -430,6 +499,16 @@ class DownloadManagerApp(Gtk.ApplicationWindow):
 
         self.set_child(scroll)
 
+    def start_http_server(self):
+        """Start HTTP server for Chrome extension communication"""
+        try:
+            self.http_server = HTTPServer(('localhost', 8080), create_http_handler(self))
+            self.http_thread = threading.Thread(target=self.http_server.serve_forever, daemon=True)
+            self.http_thread.start()
+            print("HTTP server started on localhost:8080 for Chrome extension")
+        except Exception as e:
+            print(f"Failed to start HTTP server: {e}")
+
     # --------- Events ---------
     def on_add_clicked(self, *_):
         dialog = AddDownloadDialog(self, self.config_manager)
@@ -512,6 +591,9 @@ class DownloadManagerApp(Gtk.ApplicationWindow):
         speed = "0 B/s"
         eta = "--"
         self.store.append([item.filename, progress, item.status, speed, eta, url, item])
+        
+        # Automatically start the download
+        item.start()
 
     def refresh_row(self, item: DownloadItem):
         # Find row by object
